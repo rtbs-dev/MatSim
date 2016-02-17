@@ -33,6 +33,10 @@ class cannon_MCMC:
         self.y = self.pairs[:, 1]
         print 'Added {:.0f} particles'.format(self.n)
         self.dist_mat = cdist(self.pairs, self.pairs, self.torus_dist)
+        plt.scatter(self.x, self.y)
+        plt.xlim(0,1)
+        plt.ylim(0,1)
+        plt.show()
 
     def get_physical(self, eps, sig):
         '''
@@ -41,6 +45,15 @@ class cannon_MCMC:
         self.sig = sig
         self.eps = eps
         self.LJ = lambda r: 4.*self.eps*(np.divide(self.sig, r)**12. - np.divide(self.sig, r)**6.)
+
+    def torus_pos(self, x):
+        '''
+        This function calculates the true position of a particle, assuming
+        periodic boundary conditions with orthorhombic cells. Assumes origin
+        is at the lower left of the cell.
+        '''
+        x = x - np.floor(np.divide(x, self.l))*self.l
+        return x
 
     def torus_dist(self, x1, x2):
         '''
@@ -71,7 +84,7 @@ class cannon_MCMC:
         if e_new <= e_old:  # energy is lower
             return True
         else:  # energy is higher
-            return True if np.exp((e_new-e_old)/self.T) > rand() else False
+            return True if np.exp((e_old-e_new)/self.T) > rand() else False
 
     def step(self):
         old_x = np.copy(self.pairs)  # freeze the state space in memory
@@ -79,9 +92,13 @@ class cannon_MCMC:
         pick = choice(self.pairs.shape[0], 1)
         old_dist = np.copy(self.dist_mat)
 
-        self.pairs[pick] += self.l*0.05*normal(0, 1, 2)
+        self.pairs[pick] += self.l*0.01*normal(0, 1, 2)  # gaussian movement
+        self.pairs[pick] = self.torus_pos(self.pairs[pick])  # enforce boundary
+
         self.x = self.pairs[:, 0]
         self.y = self.pairs[:, 1]
+
+        # Now, only update the affected entry of the distance matrix.
         self.dist_mat[pick] = cdist(self.pairs, self.pairs[pick], self.torus_dist).T
         self.energy()
 
