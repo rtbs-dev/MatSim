@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 from numpy.random import rand, choice, normal
 import numpy.linalg as LA
 from scipy.spatial.distance import cdist
+import pickle
+from tqdm import tqdm
 
 
 class cannon_MCMC:
@@ -19,10 +21,15 @@ class cannon_MCMC:
         self.n = int(no_particles)
         self.sig, self.eps = None, None
         self.x, self.y = None, None
-        self.trace = None
+
         self.pairs = None
         self.E = None
+        self.P = None
         self.dist_mat = None
+        self.jump_dist = 0.05
+
+        self.trace = None
+
     def populate(self):
         '''
         We assume that the initial particle positions are a uniform
@@ -42,9 +49,41 @@ class cannon_MCMC:
         '''
         defines the LJ potential for this sim.
         '''
+
         self.sig = sig
         self.eps = eps
-        self.LJ = lambda r: 4.*self.eps*(np.divide(self.sig, r)**12. - np.divide(self.sig, r)**6.)
+
+    def len_jones(self, r):
+        '''
+        Checks if distance is exactly 0 (to machine precision). Probability of different
+        particles being placed within machine precision of 0 distance from each other is
+        considered negligible.
+        :param r: Inter-particle distance
+        :return: Lennard-Jones potential
+        '''
+        v = np.zeros_like(r)
+        r_non0 = r[r != 0]
+        x = np.divide(self.sig, r_non0)
+        v[r != 0] = 4.*self.eps*(x**12. - x**6.)
+        return v
+
+    def f_len_jones(self, r):
+        '''
+        Checks if distance is exactly 0 (to machine precision). Probability of different
+        particles being placed within machine precision of 0 distance from each other is
+        considered negligible. Ignores higher-order particle interactions (n>2).
+        :param r: Inter-particle distance
+        :return: Lennard-Jones potential time-derivative (inter-molec. force)
+        '''
+
+        f = np.zeros_like(r)
+        r_non0 = r[r != 0]
+        x = np.divide(self.sig, r_non0)
+        # sign = np.sign(2**(1./6.)-1./x)
+        # f[r != 0] = sign*24.*(self.eps/self.sig)*(2*x**13. - x**7.)
+        f[r != 0] = 24.*(self.eps/self.sig)*(2*x**13. - x**7.)
+        return f
+
 
     def torus_pos(self, x):
         '''
@@ -67,32 +106,56 @@ class cannon_MCMC:
         return dx
 
     def energy(self):
-
-        # make sure we've input needed params:
-        if np.any(np.array([self.sig, self.eps])==None):
-            raise Exception('You must first define the potential parameters!')
-        if np.any(np.array([self.x, self.y])==None):
-            raise Exception('You must first populate the space!')
-
+        '''
+        This Calculates the total system potential energy via the LJ interactions.
+        :return: Energy
+        '''
         # coor_pairs = zip(self.x, self.y)
         # dist_mat = cdist(coor_pairs, coor_pairs, self.torus_dist)  # pairwise dists
-        v = np.sum(np.tril(self.LJ(self.dist_mat), k=-1))  # sum only below-diag entries
+        v = np.sum(self.len_jones(np.tril(self.dist_mat, k=-1)))  # sum only below-diag entries
         self.E = v # save it to the class
         return v
 
+    def pressure(self):
+        """
+        This calculates a corrected pressure for the system based on beta, density,
+        and the LJ interactions.
+        :return: Pressure
+        """
+        v = self.l**3
+        rho = self.n/v
+        p = rho*self.T
+
+        p_star = np.sum(self.f_len_jones(np.tril(self.dist_mat, k=-1)))/3.
+        p += p_star/v
+        self.P = p
+        return p
+
     def accept(self, e_old, e_new):
+        """
+        Determines if the new state is accepted as in Metropolis Hastings
+        :param e_old: prior state energy
+        :param e_new: proposed state energy
+        :return: True or False
+        """
         if e_new <= e_old:  # energy is lower
             return True
         else:  # energy is higher
             return True if np.exp((e_old-e_new)/self.T) > rand() else False
 
-    def step(self):
+    def step(self, dist=None):
+        '''
+        Progress to the next drawn sample and accept or reject.
+        :param dist: can dynamically change perturbation scale
+        :return:
+        '''
         old_x = np.copy(self.pairs)  # freeze the state space in memory
         old_e = self.energy()
         pick = choice(self.pairs.shape[0], 1)
         old_dist = np.copy(self.dist_mat)
-
-        self.pairs[pick] += self.l*0.01*normal(0, 1, 2)  # gaussian movement
+        if dist is not None:
+            self.jump_dist = dist
+        self.pairs[pick] += self.l*self.jump_dist*normal(0, 1, 2)  # gaussian movement
         self.pairs[pick] = self.torus_pos(self.pairs[pick])  # enforce boundary
 
         self.x = self.pairs[:, 0]
@@ -110,15 +173,45 @@ class cannon_MCMC:
             self.E = old_e
             self.dist_mat = old_dist
 
-    def mcmc(self, n):
-        self.trace = np.zeros(n)
-        self.trace[0] = self.energy()
+    def mcmc(self, n, save=False):
+        """
+        Run any number of MCMC samples, with option to write out a .pkl to save the sim
+        Contains method for convenient progress-bar.
+        :param n: Number of samples
+        :param save: whether to write out text file.
+        :return: N/A
+        """
+        # make sure we've input needed params:
+        if np.any(np.array([self.sig, self.eps])==None):
+            raise Exception('You must first define the potential parameters!')
+        if np.any(np.array([self.x, self.y])==None):
+            raise Exception('You must first populate the space!')
 
-        for i in range(1, n):
+        self.trace = np.zeros((2, n))
+        self.trace[0, 0] = self.energy()
+        self.trace[1, 0] = self.pressure()
+        pos = np.zeros((self.n, 2, n))
+
+        for i in tqdm(range(1, n)):
             self.step()
-            self.trace[i] = self.E
-            if i % 100 == 0:
-                print 'step no. '+str(i)+'\t energy: {:.2e}'.format(self.E)
+            self.pressure()
+
+            self.trace[0, i] = self.E
+            self.trace[1, i] = self.P
+            pos[:, 0, i] = self.x
+            pos[:, 1, i] = self.y
+
+            # if i % 100 == 0:
+            #     print 'step no. '+str(i)+'\t energy: {:.2e}'.format(self.E)
+
+        if save:
+            print 'saving file...'
+            file_address = './NPT-sim_beta-{0:.2f}_n-{1:.0f}_iter-{2:.0e}.pkl'.format(1./self.T, self.n, n)
+            with open(file_address, 'w') as f:
+                pickle.dump({'energies': self.trace[0, :],
+                             'pressures': self.trace[1, :],
+                             'positions': pos}, f)
+            f.close()
 
 
 # test = cannon_MCMC(100, 10.)
