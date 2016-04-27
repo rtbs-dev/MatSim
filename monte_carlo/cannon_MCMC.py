@@ -35,14 +35,14 @@ class cannon_MCMC:
         We assume that the initial particle positions are a uniform
         random samples of the space. Origin is lower left corner.
         '''
-        self.pairs = rand(self.n, 2)
+        self.pairs = self.l*rand(self.n, 2)
         self.x = self.pairs[:, 0]
         self.y = self.pairs[:, 1]
         print 'Added {:.0f} particles'.format(self.n)
         self.dist_mat = cdist(self.pairs, self.pairs, self.torus_dist)
         plt.scatter(self.x, self.y)
-        plt.xlim(0,1)
-        plt.ylim(0,1)
+        plt.xlim(0,self.l)
+        plt.ylim(0,self.l)
         plt.show()
 
     def get_physical(self, eps, sig):
@@ -206,7 +206,10 @@ class cannon_MCMC:
 
         if save:
             print 'saving file...'
-            file_address = './NPT-sim_beta-{0:.2f}_n-{1:.0f}_iter-{2:.0e}.pkl'.format(1./self.T, self.n, n)
+            file_address = './NPT-sim_beta-{0:.2f}_L-{1:.2f}_n-{2:.0f}_iter-{3:.0e}.pkl'.format(1./self.T,
+                                                                                                self.l,
+                                                                                                self.n,
+                                                                                                n)
             with open(file_address, 'w') as f:
                 pickle.dump({'energies': self.trace[0, :],
                              'pressures': self.trace[1, :],

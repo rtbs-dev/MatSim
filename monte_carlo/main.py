@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-test = Can(200, 100.)
+test = Can(200, 100., char_len=1.26)
 test.populate()
 test.get_physical(1., 0.1)
 test.mcmc(100000, save=True)
@@ -18,7 +18,7 @@ plt.show()
 
 plt.figure()
 plt.scatter(test.x, test.y)
-plt.xlim(0,1)
-plt.ylim(0,1)
+plt.xlim(0, test.l)
+plt.ylim(0, test.l)
 plt.show()
 # print test.trace
