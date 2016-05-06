@@ -37,7 +37,7 @@ def c_h (phi, dt):
     """
     return phi + (O2_lap(phi) + phi - np.power(phi, 3))*dt
 
-def __main__():
+def main():
     dt = 1e-5
     t = 0.
     N = 100
@@ -54,3 +54,6 @@ def __main__():
     with open('results_'+ident+'.pkl', 'wb') as f:
         pkl.dump({'times': np.array(times),
                   'phi(t)': dat}, f)
+
+if __name__ == "__main__":
+    main()
